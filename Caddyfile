@@ -9,63 +9,37 @@
 }
 
 :{$PORT:8080} {
-    # Health check endpoint
+    # Health check — no auth, so Railway healthchecks work
     handle /health {
         respond "OK" 200
     }
 
-    # Main proxy configuration
-    handle {
+    # Gate: only requests with the right bearer token go through
+    @authed header Authorization "Bearer {$API_SECRET}"
+    handle @authed {
         reverse_proxy {$PROXY_TARGET} {
-            # Header management
             header_up Host {upstream_hostport}
             header_up X-Real-IP {remote_host}
             header_up X-Forwarded-For {remote_host}
             header_up X-Forwarded-Proto {scheme}
             header_up X-Forwarded-Host {host}
-
-            # WebSocket support
-            @websocket {
-                header Connection *Upgrade*
-                header Upgrade websocket
-            }
-            
-            # Health check for upstream
-            health_uri /health
-            health_interval 30s
-            health_timeout 5s
-            health_status 200
         }
 
-        # Compression
-        encode {
-            gzip
-            minimum_length 1024
-        }
+        encode gzip
 
-        # Security headers
         header {
             X-Content-Type-Options "nosniff"
             X-Frame-Options "SAMEORIGIN"
-            X-XSS-Protection "1; mode=block"
             Referrer-Policy "strict-origin-when-cross-origin"
             -Server
         }
-
-        # CORS (customize as needed)
-        @cors_preflight {
-            method OPTIONS
-        }
-        header @cors_preflight {
-            Access-Control-Allow-Origin "*"
-            Access-Control-Allow-Methods "GET, POST, PUT, PATCH, DELETE, OPTIONS"
-            Access-Control-Allow-Headers "Content-Type, Authorization"
-            Access-Control-Max-Age "3600"
-        }
-        respond @cors_preflight 204
     }
 
-    # Error handling
+    # Anything else → 401
+    handle {
+        respond "Unauthorized" 401
+    }
+
     handle_errors {
         respond "{err.status_code} {err.status_text}"
     }
